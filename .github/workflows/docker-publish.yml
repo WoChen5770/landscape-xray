@@ -1,0 +1,95 @@
+name: Docker Publish
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  # 添加手动触发
+  workflow_dispatch:
+    inputs:
+      use_xray_version:
+        description: '是否使用Xray版本作为标签（默认是）'
+        required: false
+        default: true
+        type: boolean
+      custom_tag:
+        description: '自定义标签（仅在use_xray_version为false时使用）'
+        required: false
+        default: 'manual-build'
+        type: string
+    
+# 添加并发控制，避免同时运行多个构建
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 统一使用Docker Hub作为目标注册表
+  REGISTRY: docker.io
+  IMAGE_NAME: jaycq/landscape-xray
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整历史记录，便于元数据提取
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Get Xray version
+      id: xray-version
+      run: |
+        VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+        if [ -z "$VERSION" ]; then
+          echo "Failed to get Xray version, using 'latest' as fallback"
+          VERSION="latest"
+        fi
+        echo "Xray version: $VERSION"
+        echo "xray_version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.IMAGE_NAME }}
+        tags: |
+          # 使用Xray版本作为主要标签（优先级最高）
+          type=raw,value=${{ steps.xray-version.outputs.xray_version }},priority=1000
+          type=raw,value=latest,enable=${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+          # 只在推送标签时生成语义化版本标签
+          type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+          type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+          # 手动触发时：如果选择使用Xray版本，则使用Xray版本；否则使用自定义标签
+          type=raw,value=${{ steps.xray-version.outputs.xray_version }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.use_xray_version == 'true' }}
+          type=raw,value=${{ github.event.inputs.custom_tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.use_xray_version == 'false' }}
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        # 手动触发和推送事件时都推送镜像，PR时不推送
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        # 添加构建参数，确保与Dockerfile一致
+        build-args: |
+          TARGETOS=linux

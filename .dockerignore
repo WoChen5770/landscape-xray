@@ -1,0 +1,9 @@
+# Only ignore specific development and build artifacts
+.git
+.gitignore
+.vscode
+.idea
+*.iml
+dist/
+build/
+target/
