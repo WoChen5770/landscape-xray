@@ -1,6 +1,7 @@
 # Landscape Xray Docker 项目
 
-这是一个基于Xray-core的Docker镜像构建项目，集成了Loyalsoldier/v2ray-rules-dat项目的geo数据文件，同时集成了redirect_pkg_handler功能。
+这是一个基于Xray-core的Docker镜像构建项目。
+集成了Loyalsoldier/v2ray-rules-dat的geo数据文件，同时集成了landscape[redirect_pkg_handler](https://github.com/ThisSeanZhang/landscape)功能。
 
 ## Docker Hub
 
